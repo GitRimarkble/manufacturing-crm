@@ -2,6 +2,7 @@ import { NextResponse, NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
+import { TaskStatus } from '@prisma/client';
 
 export async function POST(req: NextRequest) {
   try {
@@ -52,7 +53,7 @@ export async function POST(req: NextRequest) {
           data: {
             title: `${stage.name} for Order #${order.id}`,
             description: `Complete ${stage.name.toLowerCase()} phase`,
-            status: 'TODO',
+            status: TaskStatus.TODO,
             productionStageId: stage.id,
             orderId: order.id,
           },
