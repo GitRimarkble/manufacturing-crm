@@ -1,102 +1,196 @@
-import { NextRequest } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { productionStageSchema } from '@/lib/validations/production'
-import { successResponse, handleApiError } from '@/lib/api-utils'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 
-interface RouteParams {
-  params: {
-    id: string
-  }
-}
-
-export async function GET(req: NextRequest, { params }: RouteParams) {
+export async function GET(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
   try {
-    const session = await getServerSession(authOptions)
-    
+    const session = await getServerSession(authOptions);
     if (!session) {
-      throw new Error('Unauthorized')
+      return new NextResponse(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401 }
+      );
+    }
+
+    const id = parseInt(params.id);
+    if (isNaN(id)) {
+      return new NextResponse(
+        JSON.stringify({ error: 'Invalid ID' }),
+        { status: 400 }
+      );
     }
 
     const stage = await prisma.productionStage.findUnique({
-      where: { id: parseInt(params.id) },
+      where: {
+        id,
+        deleted: false,
+      },
       include: {
-        order: {
-          include: {
-            customer: true,
-          },
-        },
         tasks: {
+          where: {
+            deleted: false,
+          },
+          include: {
+            assignedTo: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
+          },
           orderBy: {
             createdAt: 'desc',
           },
         },
       },
-    })
+    });
 
     if (!stage) {
-      throw new Error('Production stage not found')
+      return new NextResponse(
+        JSON.stringify({ error: 'Production stage not found' }),
+        { status: 404 }
+      );
     }
 
-    return successResponse(stage)
+    return NextResponse.json(stage);
   } catch (error) {
-    return handleApiError(error)
+    console.error('Error fetching production stage:', error);
+    return new NextResponse(
+      JSON.stringify({ error: 'Internal Server Error' }),
+      { status: 500 }
+    );
   }
 }
 
-export async function PATCH(req: NextRequest, { params }: RouteParams) {
+export async function PUT(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session || !['ADMIN', 'MANAGER'].includes(session.user.role)) {
-      throw new Error('Unauthorized')
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return new NextResponse(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401 }
+      );
     }
 
-    const json = await req.json()
-    const body = productionStageSchema.parse(json)
-
-    const stage = await prisma.productionStage.findUnique({
-      where: { id: parseInt(params.id) },
-    })
-
-    if (!stage) {
-      throw new Error('Production stage not found')
+    if (session.user.role !== 'ADMIN' && session.user.role !== 'MANAGER') {
+      return new NextResponse(
+        JSON.stringify({ error: 'Insufficient permissions' }),
+        { status: 403 }
+      );
     }
 
-    const updatedStage = await prisma.productionStage.update({
-      where: { id: parseInt(params.id) },
+    const id = parseInt(params.id);
+    if (isNaN(id)) {
+      return new NextResponse(
+        JSON.stringify({ error: 'Invalid ID' }),
+        { status: 400 }
+      );
+    }
+
+    const body = await request.json();
+    const stage = await prisma.productionStage.update({
+      where: {
+        id,
+        deleted: false,
+      },
       data: body,
       include: {
-        order: {
+        tasks: {
+          where: {
+            deleted: false,
+          },
           include: {
-            customer: true,
+            assignedTo: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
           },
         },
-        tasks: true,
       },
-    })
+    });
 
-    return successResponse(updatedStage)
+    return NextResponse.json(stage);
   } catch (error) {
-    return handleApiError(error)
+    console.error('Error updating production stage:', error);
+    return new NextResponse(
+      JSON.stringify({ error: 'Internal Server Error' }),
+      { status: 500 }
+    );
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: RouteParams) {
+export async function DELETE(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session || !['ADMIN', 'MANAGER'].includes(session.user.role)) {
-      throw new Error('Unauthorized')
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return new NextResponse(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401 }
+      );
     }
 
-    await prisma.productionStage.delete({
-      where: { id: parseInt(params.id) },
-    })
+    if (session.user.role !== 'ADMIN') {
+      return new NextResponse(
+        JSON.stringify({ error: 'Insufficient permissions' }),
+        { status: 403 }
+      );
+    }
 
-    return successResponse({ message: 'Production stage deleted successfully' })
+    const id = parseInt(params.id);
+    if (isNaN(id)) {
+      return new NextResponse(
+        JSON.stringify({ error: 'Invalid ID' }),
+        { status: 400 }
+      );
+    }
+
+    // Soft delete the production stage and its tasks
+    const stage = await prisma.$transaction(async (tx) => {
+      // First soft delete all tasks
+      await tx.task.updateMany({
+        where: {
+          productionStageId: id,
+          deleted: false,
+        },
+        data: {
+          deleted: true,
+          deletedAt: new Date(),
+        },
+      });
+
+      // Then soft delete the stage
+      return tx.productionStage.update({
+        where: {
+          id,
+          deleted: false,
+        },
+        data: {
+          deleted: true,
+          deletedAt: new Date(),
+        },
+      });
+    });
+
+    return NextResponse.json(stage);
   } catch (error) {
-    return handleApiError(error)
+    console.error('Error deleting production stage:', error);
+    return new NextResponse(
+      JSON.stringify({ error: 'Internal Server Error' }),
+      { status: 500 }
+    );
   }
 }

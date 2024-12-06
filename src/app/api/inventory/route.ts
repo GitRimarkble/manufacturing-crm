@@ -1,80 +1,65 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { materialInventoryCreateSchema } from '@/lib/validations/inventory'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { MaterialType } from '@prisma/client'
+import { NextResponse, NextRequest } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session || !['ADMIN', 'MANAGER'].includes(session.user.role)) {
-      return new NextResponse('Unauthorized', { status: 401 })
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return new NextResponse(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401 }
+      );
     }
 
-    const body = await req.json()
-    const validatedData = materialInventoryCreateSchema.parse(body)
+    if (session.user.role !== 'ADMIN' && session.user.role !== 'MANAGER') {
+      return new NextResponse(
+        JSON.stringify({ error: 'Insufficient permissions' }),
+        { status: 403 }
+      );
+    }
 
+    const json = await req.json();
     const material = await prisma.materialInventory.create({
-      data: validatedData,
-    })
+      data: json,
+    });
 
-    return NextResponse.json(material)
+    return NextResponse.json(material);
   } catch (error) {
-    console.error('Error in POST /api/inventory:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    console.error('Error creating material:', error);
+    return new NextResponse(
+      JSON.stringify({ error: 'Internal Server Error' }),
+      { status: 500 }
+    );
   }
 }
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    
+    const session = await getServerSession(authOptions);
     if (!session) {
-      return new NextResponse('Unauthorized', { status: 401 })
-    }
-
-    const { searchParams } = new URL(req.url)
-    const typeParam = searchParams.get('type')
-    const lowStock = searchParams.get('lowStock') === 'true'
-
-    const where: any = {
-      deleted: false,
-    }
-
-    if (typeParam && Object.values(MaterialType).includes(typeParam as MaterialType)) {
-      where.type = typeParam as MaterialType
-    }
-
-    if (lowStock) {
-      where.quantity = {
-        lte: {
-          path: ['reorderPoint'],
-        },
-      }
+      return new NextResponse(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401 }
+      );
     }
 
     const materials = await prisma.materialInventory.findMany({
-      where,
+      where: {
+        deleted: false,
+      },
       orderBy: {
-        updatedAt: 'desc',
+        name: 'asc',
       },
-      include: {
-        supplier: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            phone: true,
-          },
-        },
-      },
-    })
+    });
 
-    return NextResponse.json(materials)
+    return NextResponse.json(materials);
   } catch (error) {
-    console.error('Error in GET /api/inventory:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    console.error('Error fetching materials:', error);
+    return new NextResponse(
+      JSON.stringify({ error: 'Internal Server Error' }),
+      { status: 500 }
+    );
   }
 }

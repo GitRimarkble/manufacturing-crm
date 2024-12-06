@@ -1,32 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { taskSchema } from '@/lib/validations/production'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
+import { successResponse, errorResponse, handleApiError } from '@/lib/api-utils'
+import { TaskWithRelations, CreateTaskRequest } from '@/types/api'
+import { z } from 'zod'
+
+const createTaskSchema = z.object({
+  title: z.string(),
+  description: z.string().optional(),
+  status: z.enum(['PENDING', 'IN_PROGRESS', 'COMPLETED']),
+  assignedToId: z.number().optional(),
+  productionStageId: z.number(),
+  dueDate: z.string().transform(str => new Date(str)).optional(),
+})
 
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
     
     if (!session || !['ADMIN', 'MANAGER'].includes(session.user.role)) {
-      return new NextResponse('Unauthorized', { status: 401 })
+      return errorResponse('Unauthorized', 401)
     }
 
     const json = await req.json()
-    const body = taskSchema.parse(json)
+    const validatedData = createTaskSchema.parse(json)
 
     const task = await prisma.task.create({
       data: {
-        title: body.name,
-        description: body.description,
-        status: body.status,
-        assignedTo: body.assignedTo ? {
-          connect: { id: body.assignedTo }
+        title: validatedData.title,
+        description: validatedData.description,
+        status: validatedData.status,
+        dueDate: validatedData.dueDate,
+        deleted: false,
+        assignedTo: validatedData.assignedToId ? {
+          connect: { id: validatedData.assignedToId }
         } : undefined,
         productionStage: {
-          connect: { id: body.stageId }
+          connect: { id: validatedData.productionStageId }
         },
-        deleted: false,
       },
       include: {
         productionStage: {
@@ -55,13 +67,9 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    return NextResponse.json(task)
+    return successResponse<TaskWithRelations>(task)
   } catch (error) {
-    console.error('Error in POST /api/production/tasks:', error)
-    return new NextResponse(
-      error instanceof Error ? error.message : 'Internal Server Error',
-      { status: 500 }
-    )
+    return handleApiError(error)
   }
 }
 
@@ -70,7 +78,7 @@ export async function GET(req: NextRequest) {
     const session = await getServerSession(authOptions)
     
     if (!session) {
-      return new NextResponse('Unauthorized', { status: 401 })
+      return errorResponse('Unauthorized', 401)
     }
 
     const { searchParams } = new URL(req.url)
@@ -122,9 +130,8 @@ export async function GET(req: NextRequest) {
       },
     })
 
-    return NextResponse.json(tasks)
+    return successResponse<TaskWithRelations[]>(tasks)
   } catch (error) {
-    console.error('Error in GET /api/production/tasks:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    return handleApiError(error)
   }
 }

@@ -1,8 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { orderUpdateSchema } from '@/lib/validations/order'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { NextResponse, NextRequest } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 
 interface RouteParams {
   params: {
@@ -12,20 +11,25 @@ interface RouteParams {
 
 export async function GET(req: NextRequest, { params }: RouteParams) {
   try {
-    const session = await getServerSession(authOptions)
-    
+    const session = await getServerSession(authOptions);
     if (!session) {
-      return new NextResponse('Unauthorized', { status: 401 })
+      return new NextResponse(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401 }
+      );
     }
 
-    const orderId = parseInt(params.id)
-    if (isNaN(orderId)) {
-      return new NextResponse('Invalid order ID', { status: 400 })
+    const id = parseInt(params.id);
+    if (isNaN(id)) {
+      return new NextResponse(
+        JSON.stringify({ error: 'Invalid ID' }),
+        { status: 400 }
+      );
     }
 
     const order = await prisma.order.findUnique({
-      where: { 
-        id: orderId,
+      where: {
+        id,
         deleted: false,
       },
       include: {
@@ -46,69 +50,79 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
               select: {
                 id: true,
                 name: true,
-                type: true,
+                description: true,
                 price: true,
               },
             },
           },
         },
-        productionStages: {
+        tasks: {
           where: {
             deleted: false,
           },
-          orderBy: {
-            createdAt: 'desc',
-          },
           include: {
-            tasks: {
-              where: {
-                deleted: false,
-              },
-              include: {
-                assignedTo: {
-                  select: {
-                    id: true,
-                    name: true,
-                    email: true,
-                  },
-                },
+            assignedTo: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
               },
             },
+            productionStage: true,
           },
         },
       },
-    })
+    });
 
     if (!order) {
-      return new NextResponse('Order not found', { status: 404 })
+      return new NextResponse(
+        JSON.stringify({ error: 'Order not found' }),
+        { status: 404 }
+      );
     }
 
-    return NextResponse.json(order)
+    return NextResponse.json(order);
   } catch (error) {
-    console.error('Error in GET /api/orders/[id]:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    console.error('Error fetching order:', error);
+    return new NextResponse(
+      JSON.stringify({ error: 'Internal Server Error' }),
+      { status: 500 }
+    );
   }
 }
 
-export async function PATCH(req: NextRequest, { params }: RouteParams) {
+export async function PUT(req: NextRequest, { params }: RouteParams) {
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session || !['ADMIN', 'MANAGER'].includes(session.user.role)) {
-      return new NextResponse('Unauthorized', { status: 401 })
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return new NextResponse(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401 }
+      );
     }
 
-    const orderId = parseInt(params.id)
-    if (isNaN(orderId)) {
-      return new NextResponse('Invalid order ID', { status: 400 })
+    if (session.user.role !== 'ADMIN' && session.user.role !== 'MANAGER') {
+      return new NextResponse(
+        JSON.stringify({ error: 'Insufficient permissions' }),
+        { status: 403 }
+      );
     }
 
-    const json = await req.json()
-    const validatedData = orderUpdateSchema.parse(json)
+    const id = parseInt(params.id);
+    if (isNaN(id)) {
+      return new NextResponse(
+        JSON.stringify({ error: 'Invalid ID' }),
+        { status: 400 }
+      );
+    }
 
+    const body = await req.json();
     const order = await prisma.order.update({
-      where: { id: orderId },
-      data: validatedData,
+      where: {
+        id,
+        deleted: false,
+      },
+      data: body,
       include: {
         customer: {
           select: {
@@ -127,78 +141,67 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
               select: {
                 id: true,
                 name: true,
-                type: true,
+                description: true,
                 price: true,
               },
             },
           },
         },
       },
-    })
+    });
 
-    return NextResponse.json(order)
+    return NextResponse.json(order);
   } catch (error) {
-    console.error('Error in PATCH /api/orders/[id]:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    console.error('Error updating order:', error);
+    return new NextResponse(
+      JSON.stringify({ error: 'Internal Server Error' }),
+      { status: 500 }
+    );
   }
 }
 
 export async function DELETE(req: NextRequest, { params }: RouteParams) {
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session || session.user.role !== 'ADMIN') {
-      return new NextResponse('Unauthorized', { status: 401 })
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return new NextResponse(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401 }
+      );
     }
 
-    const orderId = parseInt(params.id)
-    if (isNaN(orderId)) {
-      return new NextResponse('Invalid order ID', { status: 400 })
+    if (session.user.role !== 'ADMIN') {
+      return new NextResponse(
+        JSON.stringify({ error: 'Insufficient permissions' }),
+        { status: 403 }
+      );
     }
 
-    // Soft delete the order and its related records
-    await prisma.$transaction([
-      // Update order products
-      prisma.orderProduct.updateMany({
-        where: { orderId },
-        data: {
-          deleted: true,
-          deletedAt: new Date(),
-        },
-      }),
-      // Update production stages
-      prisma.productionStage.updateMany({
-        where: { orderId },
-        data: {
-          deleted: true,
-          deletedAt: new Date(),
-        },
-      }),
-      // Update tasks in production stages
-      prisma.task.updateMany({
-        where: {
-          productionStage: {
-            orderId,
-          },
-        },
-        data: {
-          deleted: true,
-          deletedAt: new Date(),
-        },
-      }),
-      // Update the order itself
-      prisma.order.update({
-        where: { id: orderId },
-        data: {
-          deleted: true,
-          deletedAt: new Date(),
-        },
-      }),
-    ])
+    const id = parseInt(params.id);
+    if (isNaN(id)) {
+      return new NextResponse(
+        JSON.stringify({ error: 'Invalid ID' }),
+        { status: 400 }
+      );
+    }
 
-    return NextResponse.json({ message: 'Order deleted successfully' })
+    const order = await prisma.order.update({
+      where: {
+        id,
+        deleted: false,
+      },
+      data: {
+        deleted: true,
+        deletedAt: new Date(),
+      },
+    });
+
+    return NextResponse.json(order);
   } catch (error) {
-    console.error('Error in DELETE /api/orders/[id]:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    console.error('Error deleting order:', error);
+    return new NextResponse(
+      JSON.stringify({ error: 'Internal Server Error' }),
+      { status: 500 }
+    );
   }
 }

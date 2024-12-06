@@ -1,8 +1,19 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { taskSchema } from '@/lib/validations/production'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
+import { successResponse, errorResponse, handleApiError } from '@/lib/api-utils';
+import { TaskWithRelations, UpdateTaskRequest } from '@/types/api';
+import { z } from 'zod';
+
+const taskUpdateSchema = z.object({
+  title: z.string().optional(),
+  description: z.string().optional(),
+  status: z.enum(['PENDING', 'IN_PROGRESS', 'COMPLETED']).optional(),
+  assignedToId: z.number().optional(),
+  productionStageId: z.number().optional(),
+  dueDate: z.string().transform(str => new Date(str)).optional(),
+});
 
 interface RouteParams {
   params: {
@@ -12,39 +23,22 @@ interface RouteParams {
 
 export async function GET(req: NextRequest, { params }: RouteParams) {
   try {
-    const session = await getServerSession(authOptions)
-    
+    const session = await getServerSession(authOptions);
     if (!session) {
-      return new NextResponse('Unauthorized', { status: 401 })
+      return errorResponse('Unauthorized', 401);
     }
 
-    const taskId = parseInt(params.id)
-    if (isNaN(taskId)) {
-      return new NextResponse('Invalid task ID', { status: 400 })
+    const id = parseInt(params.id);
+    if (isNaN(id)) {
+      return errorResponse('Invalid ID', 400);
     }
 
     const task = await prisma.task.findUnique({
-      where: { 
-        id: taskId,
+      where: {
+        id,
         deleted: false,
       },
       include: {
-        productionStage: {
-          include: {
-            order: {
-              include: {
-                customer: {
-                  select: {
-                    id: true,
-                    name: true,
-                    email: true,
-                    phone: true,
-                  },
-                },
-              },
-            },
-          },
-        },
         assignedTo: {
           select: {
             id: true,
@@ -52,66 +46,61 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
             email: true,
           },
         },
+        productionStage: true,
       },
-    })
+    });
 
     if (!task) {
-      return new NextResponse('Task not found', { status: 404 })
+      return errorResponse('Task not found', 404);
     }
 
-    return NextResponse.json(task)
+    return successResponse<TaskWithRelations>(task);
   } catch (error) {
-    console.error('Error in GET /api/production/tasks/[id]:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    return handleApiError(error);
   }
 }
 
-export async function PATCH(req: NextRequest, { params }: RouteParams) {
+export async function PUT(req: NextRequest, { params }: RouteParams) {
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session || !['ADMIN', 'MANAGER'].includes(session.user.role)) {
-      return new NextResponse('Unauthorized', { status: 401 })
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return errorResponse('Unauthorized', 401);
     }
 
-    const taskId = parseInt(params.id)
-    if (isNaN(taskId)) {
-      return new NextResponse('Invalid task ID', { status: 400 })
+    if (session.user.role !== 'ADMIN' && session.user.role !== 'MANAGER') {
+      return errorResponse('Insufficient permissions', 403);
     }
 
-    const json = await req.json()
-    const body = taskSchema.parse(json)
+    const id = parseInt(params.id);
+    if (isNaN(id)) {
+      return errorResponse('Invalid ID', 400);
+    }
+
+    const body = await req.json();
+    const validatedData = taskUpdateSchema.parse(body);
+
+    // Transform the data to match Prisma's expected format
+    const updateData: any = {
+      ...validatedData,
+      assignedTo: validatedData.assignedToId ? {
+        connect: { id: validatedData.assignedToId }
+      } : undefined,
+      productionStage: validatedData.productionStageId ? {
+        connect: { id: validatedData.productionStageId }
+      } : undefined,
+    };
+
+    // Remove the raw IDs as we're using connect
+    delete updateData.assignedToId;
+    delete updateData.productionStageId;
 
     const task = await prisma.task.update({
-      where: { id: taskId },
-      data: {
-        title: body.name,
-        description: body.description,
-        status: body.status,
-        assignedTo: body.assignedTo ? {
-          connect: { id: body.assignedTo }
-        } : undefined,
-        productionStage: {
-          connect: { id: body.stageId }
-        },
+      where: {
+        id,
+        deleted: false,
       },
+      data: updateData,
       include: {
-        productionStage: {
-          include: {
-            order: {
-              include: {
-                customer: {
-                  select: {
-                    id: true,
-                    name: true,
-                    email: true,
-                    phone: true,
-                  },
-                },
-              },
-            },
-          },
-        },
         assignedTo: {
           select: {
             id: true,
@@ -119,43 +108,45 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
             email: true,
           },
         },
+        productionStage: true,
       },
-    })
+    });
 
-    return NextResponse.json(task)
+    return successResponse<TaskWithRelations>(task);
   } catch (error) {
-    console.error('Error in PATCH /api/production/tasks/[id]:', error)
-    return new NextResponse(
-      error instanceof Error ? error.message : 'Internal Server Error',
-      { status: 500 }
-    )
+    return handleApiError(error);
   }
 }
 
 export async function DELETE(req: NextRequest, { params }: RouteParams) {
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session || session.user.role !== 'ADMIN') {
-      return new NextResponse('Unauthorized', { status: 401 })
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return errorResponse('Unauthorized', 401);
     }
 
-    const taskId = parseInt(params.id)
-    if (isNaN(taskId)) {
-      return new NextResponse('Invalid task ID', { status: 400 })
+    if (session.user.role !== 'ADMIN') {
+      return errorResponse('Insufficient permissions', 403);
     }
 
-    await prisma.task.update({
-      where: { id: taskId },
+    const id = parseInt(params.id);
+    if (isNaN(id)) {
+      return errorResponse('Invalid ID', 400);
+    }
+
+    const task = await prisma.task.update({
+      where: {
+        id,
+        deleted: false,
+      },
       data: {
         deleted: true,
         deletedAt: new Date(),
       },
-    })
+    });
 
-    return NextResponse.json({ message: 'Task deleted successfully' })
+    return successResponse(task);
   } catch (error) {
-    console.error('Error in DELETE /api/production/tasks/[id]:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    return handleApiError(error);
   }
 }

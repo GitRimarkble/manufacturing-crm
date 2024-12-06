@@ -33,151 +33,127 @@ enum ProductStatus {
   DISCONTINUED
 }
 
-enum ProductionStageStatus {
-  PLANNED
-  IN_PROGRESS
-  COMPLETED
-  DELAYED
-  CANCELLED
-}
-
 enum TaskStatus {
   PENDING
   IN_PROGRESS
   COMPLETED
 }
 
-enum MaterialType {
-  RAW
-  COMPONENT
-  PACKAGING
-}
-
 model User {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique
+  id        Int       @id @default(autoincrement())
+  email     String    @unique
   name      String?
   password  String
-  role      UserRole @default(WORKER)
+  role      UserRole  @default(WORKER)
   tasks     Task[]
-  deleted   Boolean  @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deleted   Boolean   @default(false)
   deletedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+
+  @@unique([email, deleted])
 }
 
 model Customer {
-  id        Int      @id @default(autoincrement())
+  id        Int       @id @default(autoincrement())
   name      String
-  email     String   @unique
+  email     String
   phone     String?
   address   String?
   orders    Order[]
-  deleted   Boolean  @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deleted   Boolean   @default(false)
   deletedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+
+  @@unique([email, deleted])
 }
 
 model Order {
-  id              Int              @id @default(autoincrement())
-  customer        Customer         @relation(fields: [customerId], references: [id])
-  customerId      Int
-  status          OrderStatus      @default(PENDING)
-  totalAmount     Decimal
-  notes           String?
-  orderProducts   OrderProduct[]
-  productionStages ProductionStage[]
-  deleted         Boolean          @default(false)
-  deletedAt       DateTime?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  id            Int            @id @default(autoincrement())
+  customer      Customer       @relation(fields: [customerId], references: [id])
+  customerId    Int
+  status        OrderStatus    @default(PENDING)
+  totalAmount   Decimal
+  notes         String?
+  orderProducts OrderProduct[]
+  tasks         Task[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  deleted       Boolean        @default(false)
+  deletedAt     DateTime?
 }
 
 model Product {
   id            Int            @id @default(autoincrement())
   name          String
   description   String?
-  type          ProductType    @default(NEON)
-  status        ProductStatus  @default(ACTIVE)
+  type          ProductType
+  materialCost  Decimal
+  laborCost     Decimal
   price         Decimal
+  status        ProductStatus  @default(ACTIVE)
+  stock         Int           @default(0)
   orderProducts OrderProduct[]
-  deleted       Boolean        @default(false)
-  deletedAt     DateTime?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
+  deleted       Boolean        @default(false)
+  deletedAt     DateTime?
 }
 
 model OrderProduct {
-  id        Int      @id @default(autoincrement())
-  order     Order    @relation(fields: [orderId], references: [id])
-  orderId   Int
-  product   Product  @relation(fields: [productId], references: [id])
-  productId Int
-  quantity  Int
-  price     Decimal
-  deleted   Boolean  @default(false)
-  deletedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            Int       @id @default(autoincrement())
+  order         Order     @relation(fields: [orderId], references: [id])
+  orderId       Int
+  product       Product   @relation(fields: [productId], references: [id])
+  productId     Int
+  quantity      Int
+  price         Decimal
+  customization String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deleted       Boolean   @default(false)
+  deletedAt     DateTime?
 }
 
 model ProductionStage {
-  id          Int                   @id @default(autoincrement())
+  id          Int       @id @default(autoincrement())
   name        String
   description String?
-  status      ProductionStageStatus @default(PLANNED)
-  startDate   DateTime?
-  endDate     DateTime?
-  order       Order                 @relation(fields: [orderId], references: [id])
-  orderId     Int
+  orderNumber Int
   tasks       Task[]
-  deleted     Boolean               @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deleted     Boolean   @default(false)
   deletedAt   DateTime?
-  createdAt   DateTime              @default(now())
-  updatedAt   DateTime              @updatedAt
 }
 
 model Task {
-  id                Int                @id @default(autoincrement())
-  title             String
-  description       String?
-  status            TaskStatus         @default(PENDING)
-  assignedTo        User?              @relation(fields: [assignedToId], references: [id])
-  assignedToId      Int?
-  productionStage   ProductionStage    @relation(fields: [productionStageId], references: [id])
+  id               Int             @id @default(autoincrement())
+  title            String
+  description      String?
+  status           TaskStatus      @default(PENDING)
+  assignedTo       User?           @relation(fields: [assignedToId], references: [id])
+  assignedToId     Int?
+  productionStage  ProductionStage @relation(fields: [productionStageId], references: [id])
   productionStageId Int
-  deleted           Boolean            @default(false)
-  deletedAt         DateTime?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  order            Order           @relation(fields: [orderId], references: [id])
+  orderId          Int
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  deleted          Boolean         @default(false)
+  deletedAt        DateTime?
 }
 
 model MaterialInventory {
-  id            Int           @id @default(autoincrement())
-  name          String
-  description   String?
-  type          MaterialType  @default(RAW)
-  quantity      Int
-  unit          String
-  reorderPoint  Int
-  supplier      Supplier      @relation(fields: [supplierId], references: [id])
-  supplierId    Int
-  deleted       Boolean       @default(false)
-  deletedAt     DateTime?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-}
-
-model Supplier {
-  id          Int                 @id @default(autoincrement())
-  name        String
-  email       String              @unique
-  phone       String?
-  address     String?
-  materials   MaterialInventory[]
-  deleted     Boolean             @default(false)
-  deletedAt   DateTime?
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
+  id           Int       @id @default(autoincrement())
+  name         String
+  description  String?
+  quantity     Int       @default(0)
+  unit         String
+  reorderPoint Int       @default(10)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deleted      Boolean   @default(false)
+  deletedAt    DateTime?
 }

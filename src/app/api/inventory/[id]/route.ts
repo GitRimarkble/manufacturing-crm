@@ -1,6 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse, NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { materialInventoryUpdateSchema } from '@/lib/validations/inventory'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 
@@ -15,85 +14,58 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     const session = await getServerSession(authOptions)
     
     if (!session) {
-      return new NextResponse('Unauthorized', { status: 401 })
+      return new NextResponse(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })
     }
 
-    const materialId = parseInt(params.id)
-    if (isNaN(materialId)) {
-      return new NextResponse('Invalid material ID', { status: 400 })
+    const id = parseInt(params.id)
+    if (isNaN(id)) {
+      return new NextResponse(JSON.stringify({ error: 'Invalid ID' }), { status: 400 })
     }
 
     const material = await prisma.materialInventory.findUnique({
-      where: { 
-        id: materialId,
+      where: {
+        id,
         deleted: false,
-      },
-      include: {
-        supplier: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            phone: true,
-          },
-        },
-      },
+      }
     })
 
     if (!material) {
-      return new NextResponse('Material not found', { status: 404 })
+      return new NextResponse(JSON.stringify({ error: 'Material not found' }), { status: 404 })
     }
 
     return NextResponse.json(material)
   } catch (error) {
-    console.error('Error in GET /api/inventory/[id]:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    console.error('Error fetching material:', error)
+    return new NextResponse(JSON.stringify({ error: 'Internal Server Error' }), { status: 500 })
   }
 }
 
-export async function PATCH(req: NextRequest, { params }: RouteParams) {
+export async function PUT(req: NextRequest, { params }: RouteParams) {
   try {
     const session = await getServerSession(authOptions)
     
     if (!session || !['ADMIN', 'MANAGER'].includes(session.user.role)) {
-      return new NextResponse('Unauthorized', { status: 401 })
+      return new NextResponse(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })
     }
 
-    const materialId = parseInt(params.id)
-    if (isNaN(materialId)) {
-      return new NextResponse('Invalid material ID', { status: 400 })
+    const id = parseInt(params.id)
+    if (isNaN(id)) {
+      return new NextResponse(JSON.stringify({ error: 'Invalid ID' }), { status: 400 })
     }
 
     const json = await req.json()
-    const validatedData = materialInventoryUpdateSchema.parse(json)
-
-    const updateData: any = { ...validatedData }
-    if (validatedData.supplierId) {
-      updateData.supplier = {
-        connect: { id: validatedData.supplierId },
-      }
-      delete updateData.supplierId
-    }
-
     const material = await prisma.materialInventory.update({
-      where: { id: materialId },
-      data: updateData,
-      include: {
-        supplier: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            phone: true,
-          },
-        },
+      where: {
+        id,
+        deleted: false,
       },
+      data: json,
     })
 
     return NextResponse.json(material)
   } catch (error) {
-    console.error('Error in PATCH /api/inventory/[id]:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    console.error('Error updating material:', error)
+    return new NextResponse(JSON.stringify({ error: 'Internal Server Error' }), { status: 500 })
   }
 }
 
@@ -102,25 +74,28 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
     const session = await getServerSession(authOptions)
     
     if (!session || session.user.role !== 'ADMIN') {
-      return new NextResponse('Unauthorized', { status: 401 })
+      return new NextResponse(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })
     }
 
-    const materialId = parseInt(params.id)
-    if (isNaN(materialId)) {
-      return new NextResponse('Invalid material ID', { status: 400 })
+    const id = parseInt(params.id)
+    if (isNaN(id)) {
+      return new NextResponse(JSON.stringify({ error: 'Invalid ID' }), { status: 400 })
     }
 
-    await prisma.materialInventory.update({
-      where: { id: materialId },
+    const material = await prisma.materialInventory.update({
+      where: {
+        id,
+        deleted: false,
+      },
       data: {
         deleted: true,
         deletedAt: new Date(),
       },
     })
 
-    return NextResponse.json({ message: 'Material deleted successfully' })
+    return NextResponse.json(material)
   } catch (error) {
-    console.error('Error in DELETE /api/inventory/[id]:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    console.error('Error deleting material:', error)
+    return new NextResponse(JSON.stringify({ error: 'Internal Server Error' }), { status: 500 })
   }
 }

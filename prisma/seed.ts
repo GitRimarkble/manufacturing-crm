@@ -1,4 +1,4 @@
-const { PrismaClient } = require('@prisma/client')
+const { PrismaClient, UserRole, TaskStatus, ProductionStageStatus } = require('@prisma/client')
 const { hash } = require('bcrypt')
 
 const prisma = new PrismaClient()
@@ -11,7 +11,29 @@ async function main() {
       email: 'admin@example.com',
       name: 'Admin User',
       password: adminPassword,
-      role: 'ADMIN',
+      role: UserRole.ADMIN,
+    },
+  })
+
+  // Create manager user
+  const managerPassword = await hash('manager123', 10)
+  const manager = await prisma.user.create({
+    data: {
+      email: 'manager@example.com',
+      name: 'Manager User',
+      password: managerPassword,
+      role: UserRole.MANAGER,
+    },
+  })
+
+  // Create worker user
+  const workerPassword = await hash('worker123', 10)
+  const worker = await prisma.user.create({
+    data: {
+      email: 'worker@example.com',
+      name: 'Worker User',
+      password: workerPassword,
+      role: UserRole.WORKER,
     },
   })
 
@@ -29,54 +51,85 @@ async function main() {
   const product = await prisma.product.create({
     data: {
       name: 'Custom LED Sign',
+      description: 'High-quality LED sign with customizable options',
       type: 'LED',
       materialCost: 150.00,
       laborCost: 100.00,
+      price: 325.00, // (materialCost + laborCost) * 1.3
       status: 'ACTIVE',
       stock: 5,
     },
   })
+
+  // Create production stages
+  const stages = await Promise.all([
+    prisma.productionStage.create({
+      data: {
+        name: 'Design',
+        description: 'Create design based on customer requirements',
+        orderNumber: 1,
+        status: ProductionStageStatus.PLANNED,
+      },
+    }),
+    prisma.productionStage.create({
+      data: {
+        name: 'Material Preparation',
+        description: 'Prepare required materials and components',
+        orderNumber: 2,
+        status: ProductionStageStatus.PLANNED,
+      },
+    }),
+    prisma.productionStage.create({
+      data: {
+        name: 'Assembly',
+        description: 'Assemble the product components',
+        orderNumber: 3,
+        status: ProductionStageStatus.PLANNED,
+      },
+    }),
+    prisma.productionStage.create({
+      data: {
+        name: 'Quality Check',
+        description: 'Verify product quality and functionality',
+        orderNumber: 4,
+        status: ProductionStageStatus.PLANNED,
+      },
+    }),
+  ])
 
   // Create an order
   const order = await prisma.order.create({
     data: {
       customerId: customer.id,
       status: 'IN_PRODUCTION',
-      totalAmount: 500.00,
+      totalAmount: 650.00,
+      notes: 'Rush order - needed by end of month',
       orderProducts: {
         create: {
           productId: product.id,
           quantity: 2,
+          price: 325.00,
           customization: 'Blue color, 24x36 inches',
         },
       },
     },
   })
 
-  // Create a production stage
-  const stage = await prisma.productionStage.create({
-    data: {
-      name: 'Initial Design',
-      orderId: order.id,
-      startDate: new Date(),
-      status: 'IN_PROGRESS',
-      description: 'Creating initial design mockups',
-    },
-  })
+  // Create tasks for the order
+  await Promise.all(stages.map(stage =>
+    prisma.task.create({
+      data: {
+        title: `${stage.name} for Order #${order.id}`,
+        description: `Complete ${stage.name.toLowerCase()} phase for custom LED sign`,
+        status: TaskStatus.PENDING,
+        assignedToId: worker.id,
+        productionStageId: stage.id,
+        orderId: order.id,
+      },
+    })
+  ))
 
-  // Create tasks for the stage
-  await prisma.task.create({
-    data: {
-      name: 'Design Mockup',
-      description: 'Create initial design mockup for client approval',
-      status: 'IN_PROGRESS',
-      stageId: stage.id,
-      assignedTo: admin.id,
-      dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
-    },
-  })
-
-  console.log('Database seeded successfully!')
+  console.log('Database has been seeded. 🌱')
 }
 
 main()
